@@ -14,8 +14,10 @@ class Preprocessor:
 
         # Split training and testing
         train_index = int(len(self.raw) * training_size)
-        self.train = self.raw.iloc[:train_index]
-        self.test = self.raw.iloc[train_index:]
+        self.train = cp.deepcopy(self.raw.iloc[:train_index])
+        self.test = cp.deepcopy(self.raw.iloc[train_index:])
+
+        self.scaler = self.standardise()
 
     def check_data(self):
 
@@ -36,6 +38,8 @@ class Preprocessor:
         # Standardise train and test
         self.train['value'] = scaler.transform(self.train[['value']])
         self.test['value'] = scaler.transform(self.test[['value']])
+
+        return scaler
 
     @staticmethod
     def create_sequences(x, timesteps):

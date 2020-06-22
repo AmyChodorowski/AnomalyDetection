@@ -1,4 +1,6 @@
 import pandas as pd
+import numpy as np
+import seaborn as sns
 
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, LSTM, Dropout, RepeatVector, TimeDistributed
@@ -7,13 +9,18 @@ from tensorflow.keras.callbacks import EarlyStopping
 from matplotlib.pyplot import rcParams
 import matplotlib.pyplot as plt
 
+import plotly.express as px
+import plotly.graph_objects as go
+
 rcParams['figure.figsize'] = 14, 8
+sns.set(style='whitegrid', palette='muted')
 
 
 class AutoEncoder_LSTM:
 
-    def __init__(self, num_lstm_layers=128, num_timesteps=30, num_features=1):
+    def __init__(self, p_data, num_lstm_layers=128, num_timesteps=30, num_features=1):
 
+        self.p_data = p_data
         self.num_timesteps = num_timesteps
         self.num_features = num_features
         self.model = Sequential([
@@ -36,17 +43,21 @@ class AutoEncoder_LSTM:
         # adam = Stochastic Gradient Descent method
         self.model.compile(loss='mae', optimizer='adam')
 
+        self.trained = False
+        self.tested = False
+
         self.train_history = None
         self.train_loss = None
+        self.test_loss = None
+        self.threshold = None
 
-    def train_model(self, p_data, num_patience=3):
+    def train_model(self, num_patience=3):
         """
         Training the model on the preprocessed training data
-        :param p_data: Class Preprocessor, preprocessed data
         :return: Updates self.model_trained with fitted tensor model
         """
 
-        x_train, y_train = p_data.create_sequences(p_data.train, self.num_timesteps)
+        x_train, y_train = self.p_data.create_sequences(self.p_data.train, self.num_timesteps)
 
         # Early stopping
         es = EarlyStopping(monitor='val_loss', patience=num_patience, mode='min')
@@ -60,16 +71,84 @@ class AutoEncoder_LSTM:
 
         self.train_history = history
 
-        # Loss
+        # Calculate the train losses
         x_train_pred = self.model.predict(x_train)
-        train_loss = pd.Data
+        self.train_loss = pd.DataFrame(np.mean(np.abs(x_train_pred - x_train), axis=1), columns=['loss'])
+
+        # Determine the threshold
+        train_m = pd.Series.mean(self.train_loss.loss)
+        train_s = pd.Series.std(self.train_loss.loss)
+        self.threshold = [train_m-train_s*3, train_m+train_s*3]
+
+        self.trained = True
+
+    def test_model(self):
+
+        x_test, _ = self.p_data.create_sequences(self.p_data.test, self.num_timesteps)
+
+        # Calculate test losses
+        x_test_pred = self.model.predict(x_test)
+        self.test_loss = pd.DataFrame(self.p_data.test[self.num_timesteps:])
+        self.test_loss['loss'] = np.mean(np.abs(x_test_pred - x_test), axis=1)
+        self.test_loss['threshold_lower'] = self.threshold[0]
+        self.test_loss['threshold_upper'] = self.threshold[1]
+        self.test_loss['anomaly'] = (self.test_loss.threshold_lower > self.test_loss.loss) |\
+                                    (self.test_loss.loss > self.test_loss.threshold_upper)
+
+        self.tested = True
 
     def plot_trained_model(self):
 
-        if self.model_trained:
+        if self.trained:
             plt.plot(self.train_history.history['loss'], label='Training loss')
             plt.plot(self.train_history.history['val_loss'], label='Validation loss')
             plt.legend()
 
         else:
-            raise ValueError('Train model with data')
+            raise ValueError('Model must be trained first with preprocessed data')
+
+    def plot_trained_threshold(self):
+
+        if self.trained:
+            print('Lower threshold: {l}'.format(l=self.threshold[0]))
+            print('Upper threshold: {u}'.format(u=self.threshold[1]))
+
+            sns.distplot(self.train_loss, bins=50, kde=True)
+
+        else:
+            raise ValueError('Model must be trained first with preprocessed data')
+
+    def plot_tested_model(self):
+
+        if self.tested:
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=self.test_loss.date, y=self.test_loss.loss,
+                                     mode='lines', name='Test Loss'))
+            fig.add_trace(go.Scatter(x=self.test_loss.date, y=self.test_loss.threshold_lower,
+                                     mode='lines', name='Threhold (lower)'))
+            fig.add_trace(go.Scatter(x=self.test_loss.date, y=self.test_loss.threshold_upper,
+                                     mode='lines', name='Threhold (upper)'))
+            fig.update_layout(showlegend=True)
+            fig.show()
+
+        else:
+            raise ValueError('Model must be tested')
+
+    def plot_anomalies(self):
+
+        if self.tested:
+
+            anomalies = self.test_loss[self.test_loss.anomaly]
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=self.p_data.raw.date, y=self.p_data.raw.value,
+                                     mode='lines', name='Value'))
+            fig.add_trace(go.Scatter(x=self.test_loss.date, y=self.p_data.scaler.inverse_transform(self.test_loss.value),
+                                     mode='lines', name='Tested'))
+            fig.add_trace(go.Scatter(x=anomalies.date, y=self.p_data.scaler.inverse_transform(anomalies.value),
+                                     mode='markers', name='Anomalies'))
+            fig.update_layout(showlegend=True)
+            fig.show()
+
+        else:
+            raise ValueError('Model must be tested')
+
