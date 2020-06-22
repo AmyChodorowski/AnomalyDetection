@@ -1,0 +1,14 @@
+# PyCharm folders and files
+.idea
+__pycache__
+sandbox.py
+venv/
+
+# Generated files
+*.json
+*.zip
+*.xlsx
+docs
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
