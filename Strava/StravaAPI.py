@@ -1,17 +1,32 @@
+"""
+1) Create Strava API account (https://developers.strava.com/docs/getting-started/#account)
+2) Take a note of the [CLIENT_ID] and [CLIENT_SECRECT]
+3) Paste your [CLIENT_ID] into the URL: http://www.strava.com/oauth/authorize?client_id=[CLIENT_ID]&response_type=code&redirect_uri=http://localhostscope=activity:read_all,activity:write
+4) Place the URL into browser, click "Authorize"
+5) Within the redirected URL, copy the [CODE]
+6) Place [CLIENT_ID], [CLIENT_SECRECT] and [CODE] into the command: curl -X POST https://www.strava.com/oauth/token -F client_id=[CLIENT_ID]	-F client_secret=[CLIENT_SECRET] -F code=[CODE]	-F grant_type=authorization_code
+7) Run the command and copy the [REFRESH_TOKEN]
+8) Place the [CLIENT_ID], [CLIENT_SECRECT] and [REFRESH_TOKEN] as environment variables
+"""
+
 import os
 import requests
 import pandas as pd
+import urllib3
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 class StravaApi:
 
     def __init__(self):
-        self.CLIENT_ID = os.environ['client_id']
-        self.CLIENT_SECRET = os.environ['client_secret']
-        self.REFRESH_TOKEN = os.environ['refresh_token']
+        self.CLIENT_ID = os.environ['CLIENT_ID']
+        self.CLIENT_SECRET = os.environ['CLIENT_SECRET']
+        self.REFRESH_TOKEN = os.environ['REFRESH_TOKEN']
         self.URL = r"https://www.strava.com/api/v3"
 
         self.header = self.refresh_token()
+        self.althete_id = self.get_althete()
 
     def refresh_token(self):
         """
@@ -32,6 +47,11 @@ class StravaApi:
         header = {'Authorization': f'Bearer {access_token}'}
 
         return header
+
+    def get_althete(self):
+        url = '/'.join([self.URL, 'athlete'])
+        athlete = requests.get(url, headers=self.header).json()
+        return athlete['id']
 
     def get_runs(self, start, end):
         """
@@ -62,7 +82,7 @@ class StravaApi:
         """
         Convert the runs from list() to DataFrame
         :param runs_lt: Runs in a list of DetailedActivity
-        :return: pandas.DataFrame
+        :return runs_df: pandas.DataFrame
         """
         runs_df = pd.DataFrame()
 
@@ -73,14 +93,14 @@ class StravaApi:
 
         return runs_df
 
-    def save_runs(self, runs_dt):
+    def save_runs(self, runs_df):
         """
         Save the runs to file
         :param runs_dt: pandas.DataFrame of the runs
         """
         # First and last run
-        runs_dt.sort_values('start_date', inplace=True)
-        first, last = runs_dt.start_date.min(), runs_dt.start_date.max()
+        runs_df.sort_values('start_date', inplace=True)
+        first, last = runs_df.start_date.min(), runs_df.start_date.max()
         first = first.replace('T', '-')
         last = last.replace('T', '-')
         first = first.replace(':', '-')
@@ -88,12 +108,19 @@ class StravaApi:
         first = first.replace('Z', '')
         last = last.replace('Z', '')
 
-        # Filepath
-        dir_path = os.path.dirname(os.path.realpath(__file__))
-        dir_path = dir_path.replace('Strava', 'Data')
-        path = os.path.join(dir_path, f"{self.CLIENT_ID}_{first}_{last}_runs.csv")
+        # Make id str
+        runs_df['id'] = runs_df['id'].apply(lambda x: int(x))
+        runs_df['id'] = runs_df['id'].astype(str)
 
-        runs_dt.to_csv(path, sep=',', header=True)
+        # Make athlete id str
+        runs_df['athlete_id'] = runs_df['athlete_id'].apply(lambda x: int(x))
+        runs_df['athlete_id'] = runs_df['athlete_id'].astype(str)
+
+        # Filepath
+        dir_path = self.get_data_folder()
+        path = os.path.join(dir_path, f"{self.althete_id}_{first}_{last}_runs.csv")
+
+        runs_df.to_csv(path, sep=',', header=True)
 
     @staticmethod
     def flatten_run(run):
@@ -122,3 +149,9 @@ class StravaApi:
         run.pop('map')
 
         return run
+
+    @staticmethod
+    def get_data_folder():
+        dir_path = os.path.dirname(os.path.realpath(__file__))
+        dir_path = dir_path.replace('Strava', 'Data')
+        return dir_path
