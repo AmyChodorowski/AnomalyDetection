@@ -10,5 +10,15 @@ venv/
 *.xlsx
 docs
 
+*.gpx
+*.gpx.gz
+*.tcx
+*.tcx.gz
+*.fit
+*.fit.gz
+*.csv
+
+.png
+
 # Jupyter checkpoints
 .ipynb_checkpoints/
