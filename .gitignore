@@ -19,3 +19,6 @@ venv/
 
 # Jupyter checkpoints
 .ipynb_checkpoints/
+
+# Keep input data
+!sandf500_1986_2018.csv
