@@ -8,8 +8,6 @@ venv/
 *.json
 *.zip
 *.xlsx
-docs
-
 *.gpx
 *.gpx.gz
 *.tcx
@@ -17,8 +15,7 @@ docs
 *.fit
 *.fit.gz
 *.csv
-
-.png
+*.png
 
 # Jupyter checkpoints
 .ipynb_checkpoints/

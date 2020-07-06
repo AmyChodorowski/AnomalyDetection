@@ -8,12 +8,14 @@
 
 import os
 import gzip
-import shutil
+import re
 
 import gpxpy
+import xml.etree.ElementTree as etree
 import fitdecode
 
 import pandas as pd
+import datetime as dt
 
 
 class StravaData:
@@ -22,11 +24,17 @@ class StravaData:
         self.athlete_id = athlete_id
         self.activity_folder, self.activities = self.get_activities()
 
-        self.data_headers = ['timestamp',      # int,   seconds
-                             'position_lat',   # float, degs
-                             'position_long',  # float, degs
-                             'speed'           # Float, m/s
-                             'elevation']      # Float, m
+        self.data_headers = ['timestamp',            # datetime.datetime, 2017-07-29 11:19:22+00:00
+                             'position_long',        # float, degs
+                             'position_lat',         # float, degs
+                             'distance',             # float, m
+                             'speed',                # float, m/s
+                             'altitude',             # float, m
+                             'heart_rate',           # int,   bpm
+                             'enhanced_altitude',
+                             'enhanced_speed',
+                             'cadence',
+                             'fractional_cadence']
 
     def get_activities(self):
         """
@@ -41,48 +49,72 @@ class StravaData:
         activities_df = activities_df.set_index('Activity ID')
         return folder, activities_df
 
-    # TODO
     def get_activity_data(self, id):
         """
         Get the raw data of an activity and place into a DataFrame, using self.data_headers
-        Also save under [ATHLETE_ID]_df/[ACTIVITY_ID].csv
+        Also save under [ATHLETE_ID]_activities/[ACTIVITY_ID].csv
         :param id: ACTIVITY_ID
         :return: pandas.DataFrame
         """
-
-        print(f"Getting data for activity {id}...")
-        df = pd.DataFrame(columns=self.data_headers)
 
         # Files types:
         #   .gpx (GPs eXchange format) - XML file, common GPS data schema
         #   .tcx (Training Center Xml) - XML file, common fitness data schema
         #   .fit (Flexible and Interoperable data Transfer) - Binary file, Garmin's verison of .tcx
 
-        file = self.activities.loc[id, 'Filename']
-        file = file.replace(r"activities/", '')
-        file = file.replace(r".gz", '')
+        try:
+            file = self.activities.loc[id, 'Filename']
+            file = file.replace(r"activities/", '')
+            file = file.replace(r".gz", '')
 
-        path = os.path.join(self.activity_folder, file)
-        if file.endswith('.gpx'):
-            df = self.parse_gpx_file(df, path)
-        elif file.endswith('.tcx'):
-            df = self.parse_tcx_file(df, path)
-        elif file.endswith('.fit'):
-            df = self.parse_fit_file(df, path)
+        except Exception as e:
+            print(f"No data for activity {id}")
+            print(e)
+            print()
+            return
+
+        print(f"Getting data for activity {id}: {file}...")
+
+        df = pd.DataFrame(columns=self.data_headers)
+
+        try:
+            path = os.path.join(self.activity_folder, file)
+            if file.endswith('.gpx'):
+                df = self.parse_gpx_file(df, path)
+            elif file.endswith('.tcx'):
+                df = self.parse_tcx_file(df, path)
+            elif file.endswith('.fit'):
+                df = self.parse_fit_file(df, path)
+
+        except Exception as e:
+            print(f"Unsuccessful for activity {id}: {file}")
+            print(e)
+            print()
+            return
 
         # Save the file
-        df.to_csv()
-
+        path = os.path.join(self.activity_folder, f"{id}.csv")
+        df.to_csv(path)
+        print(f"Saved under {id}.csv")
+        print()
         return df
 
     def unzip_gz_files(self):
         for file in os.listdir(self.activity_folder):
             if file.endswith(".gz"):
-                print(f"Uncompress {file} to {file.replace('.gz', '')}")
-                path = os.path.join(self.activity_folder, file)
-                with gzip.open(path, 'rb') as f_in:
-                    with open(path.replace('.gz', ''), 'wb') as f_out:
-                        shutil.copyfileobj(f_in, f_out)
+                file_z = file
+                file_uz = file.replace('.gz', '')
+                path_z = os.path.join(self.activity_folder, file_z)
+                path_uz = os.path.join(self.activity_folder, file_uz)
+                print(f"Uncompress {file_z} to {file_uz}")
+
+                with gzip.open(path_z, 'rb') as f_in:
+                    file_content = f_in.read()
+                    file_content = file_content.strip()
+                    with open(path_uz, 'wb') as f_out:
+                        f_out.write(file_content)
+
+                # Remove gaps at the start
 
     @staticmethod
     def get_data_folder():
@@ -90,54 +122,77 @@ class StravaData:
         dir_path = dir_path.replace('Strava', 'Data')
         return dir_path
 
-    # TODO
     @staticmethod
     def parse_gpx_file(df, path):
+        # https://ocefpaf.github.io/python4oceanographers/blog/2014/08/18/gpx/
+        index = len(df.index)
         gpx = gpxpy.parse(open(path))
+
         for track in gpx.tracks:
             for segment in track.segments:
                 for point_idx, point in enumerate(segment.points):
-                    
+                    df.loc[index, 'timestamp'] = point.time
+                    df.loc[index, 'position_lat'] = point.latitude
+                    df.loc[index, 'position_long'] = point.longitude
+                    df.loc[index, 'speed'] = segment.get_speed(point_idx)
+                    df.loc[index, 'altitude'] = point.elevation
 
-        print("{} track(s)".format(len(gpx.tracks)))
-        track = gpx.tracks[0]
+                    # Update index
+                    index += 1
 
-        print("{} segment(s)".format(len(track.segments)))
-        segment = track.segments[0]
-
-        print("{} point(s)".format(len(segment.points)))
         return df
 
-    # TODO
     @staticmethod
     def parse_tcx_file(df, path):
+        index = len(df.index)
+
+        with open(path) as xml_file:
+            xml_str = xml_file.read()
+            xml_str = re.sub(' xmlns="[^"]+"', '', xml_str, count=1)
+            tcx = etree.fromstring(xml_str)
+            activities = tcx.findall('.//Activity')
+            for activity in activities:
+                tracking_points = activity.findall('.//Trackpoint')
+                for point in list(tracking_points):
+                    ts = dt.datetime.strptime(str(point.find('Time').text), '%Y-%m-%dT%H:%M:%SZ')
+                    df.loc[index, 'timestamp'] = ts
+                    df.loc[index, 'position_lat'] = point.find('Position').find('LatitudeDegrees').text
+                    df.loc[index, 'position_long'] = point.find('Position').find('LongitudeDegrees').text
+                    df.loc[index, 'distance'] = point.find('DistanceMeters').text
+                    df.loc[index, 'altitude'] = point.find('AltitudeMeters').text
+                    if point.find('HeartRateBpm') is not None:
+                        df.loc[index, 'heart_rate'] = point.find('HeartRateBpm').find('Value').text
+                    if point.find('Extensions').find('{http://www.garmin.com/xmlschemas/ActivityExtension/v2}TPX') is not None:
+                        df.loc[index, 'speed'] = point.find('Extensions').find('{http://www.garmin.com/xmlschemas/ActivityExtension/v2}TPX').find('Speed').text
+
+                    # Update index
+                    index += 1
+
         return df
 
-    # TODO
     @staticmethod
     def parse_fit_file(df, path):
-        allowed_fields = ['timestamp', 'position_lat', 'position_long', 'distance',
-                          'enhanced_altitude', 'altitude', 'enhanced_speed',
-                          'speed', 'heart_rate', 'cadence', 'fractional_cadence']
+        index = len(df.index)
+        SEMI_2_DEGS = 180.0 / 2 ** 31
+
+        # https://maxcandocia.com/article/2017/Sep/22/converting-garmin-fit-to-csv/
         required_fields = ['timestamp', 'position_lat', 'position_long', 'altitude']
+
         with fitdecode.reader.FitReader(path) as fit:
             for frame in fit:
-                # The yielded frame object is of one of the following types:
-                # * fitdecode.FitHeader
-                # * fitdecode.FitDefinitionMessage
-                # * fitdecode.FitDataMessage
-                # * fitdecode.FitCRC
-
                 if isinstance(frame, fitdecode.FitDataMessage):
-                    # Here, frame is a FitDataMessage object.
-                    # A FitDataMessage object contains decoded values that
-                    # are directly usable in your script logic.
-                    f = []
-                    for field in frame.fields:
-                        f.append(str(field.name))
-                        pass
-                    print(frame.name, f)
-        print('Finished')
+                    if hasattr(frame, 'fields'):
+                        fields = [f.name for f in frame.fields]
+                        if all(f in fields for f in required_fields):
+                            for field in frame.fields:
+                                if field.name.startswith('position_'):
+                                    df.loc[index, field.name] = field.value * SEMI_2_DEGS
+                                else:
+                                    df.loc[index, field.name] = field.value
+
+                            # Update index
+                            index += 1
+            pass
 
         return df
 
