@@ -45,6 +45,12 @@ class StravaData:
         dir_path = self.get_data_folder()
         folder = os.path.join(dir_path, f"{self.athlete_id}_activities")
         path = os.path.join(folder, "activities.csv")
+
+        if not os.path.isdir(folder):
+            raise ValueError("Athlete's folder doesn't exist or doesn't have the correct name")
+        if not os.path.isfile(path):
+            raise ValueError("Athlete's activity.csv doesn't exist or doesn't have the correct name")
+
         activities_df = pd.read_csv(path, header=0)
         activities_df = activities_df.set_index('Activity ID')
         return folder, activities_df

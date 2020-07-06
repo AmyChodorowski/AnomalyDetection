@@ -16,7 +16,7 @@ strava = StravaApi()
 
 # Runs to update gear
 start = dt.datetime(2019, 4, 13)  # 13th April 2019
-end = dt.datetime(2020, 7, 1)  # 1st July 2020
+end = dt.datetime(2020, 7, 1)     # 1st July 2020
 runs = strava.get_runs(start=start, end=end)
 
 # Gear g3079004 - 'Brooks Glycerin'
