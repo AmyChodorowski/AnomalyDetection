@@ -20,7 +20,7 @@ class AutoEncoder_LSTM:
     def __init__(self, p_data, num_lstm_layers=128, num_timesteps=30, num_features=1):
 
         # Further reading: https://machinelearningmastery.com/lstm-autoencoders/
-
+        # Look closely at Prediction LSTM Autoencoder
         self.p_data = p_data
         self.num_timesteps = num_timesteps
         self.num_features = num_features
@@ -74,12 +74,16 @@ class AutoEncoder_LSTM:
 
         # Calculate the train losses
         x_train_pred = self.model.predict(x_train)
-        self.train_loss = pd.DataFrame(np.mean(np.abs(x_train_pred - x_train), axis=1), columns=['loss'])
+        train_loss = np.mean(np.abs(x_train_pred - x_train), axis=1)
 
         # Determine the threshold
-        train_m = pd.Series.mean(self.train_loss.loss)
-        train_s = pd.Series.std(self.train_loss.loss)
-        self.threshold = [train_m-train_s*3, train_m+train_s*3]
+        m, s = np.mean(train_loss), np.std(train_loss)
+        self.threshold = [m-s*3, m+s*3]
+
+        self.train_loss = pd.DataFrame(self.p_data.train[self.num_timesteps:])
+        self.train_loss['loss'] = train_loss
+        self.train_loss['threshold_lower'] = self.threshold[0]
+        self.train_loss['threshold_upper'] = self.threshold[1]
 
         self.trained = True
 
@@ -89,8 +93,10 @@ class AutoEncoder_LSTM:
 
         # Calculate test losses
         x_test_pred = self.model.predict(x_test)
+        test_loss = np.mean(np.abs(x_test_pred - x_test), axis=1)
+
         self.test_loss = pd.DataFrame(self.p_data.test[self.num_timesteps:])
-        self.test_loss['loss'] = np.mean(np.abs(x_test_pred - x_test), axis=1)
+        self.test_loss['loss'] = test_loss
         self.test_loss['threshold_lower'] = self.threshold[0]
         self.test_loss['threshold_upper'] = self.threshold[1]
         self.test_loss['anomaly'] = (self.test_loss.threshold_lower > self.test_loss.loss) |\
@@ -98,7 +104,7 @@ class AutoEncoder_LSTM:
 
         self.tested = True
 
-    def plot_trained_model(self):
+    def plot_training_history(self):
 
         if self.trained:
             print("Below is the training loss vs the validation loss for each epoch of the fitting the model to the "
@@ -119,26 +125,44 @@ class AutoEncoder_LSTM:
         if self.trained:
             print("Below is the distribution of the training losses |(predicted - actual)|")
             print("Thresholds have been created using \u03BC \u00B1 3\u03C3")
+            print("")
             print('Lower threshold: {l}'.format(l=self.threshold[0]))
             print('Upper threshold: {u}'.format(u=self.threshold[1]))
 
-            sns.distplot(self.train_loss, bins=50, kde=True, axlabel="Training loss")
+            sns.distplot(self.train_loss.loss, bins=50, kde=True, axlabel="Training loss")
 
         else:
             raise ValueError('Model must be trained first with preprocessed data')
 
-    def plot_tested_model(self):
+    def plot_trained_loss(self):
+
+        if self.trained:
+            print("Below is train losses |(predicted - actual)| in time")
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=self.train_loss.date, y=self.train_loss.loss,
+                                     mode='lines', name='Train Loss'))
+            fig.add_trace(go.Scatter(x=self.train_loss.date, y=self.train_loss.threshold_lower,
+                                     mode='lines', name='Threshold (lower)'))
+            fig.add_trace(go.Scatter(x=self.train_loss.date, y=self.train_loss.threshold_upper,
+                                     mode='lines', name='Threshold (upper)'))
+            fig.update_layout(showlegend=True, xaxis_title="Date", yaxis_title="Loss")
+            fig.show()
+
+        else:
+            raise ValueError('Model must be trained first with preprocessed data')
+
+    def plot_tested_loss(self):
 
         if self.tested:
-            print("Below is standardised test data between the trained thresholds")
+            print("Below is test losses |(predicted - actual)| in time")
             fig = go.Figure()
             fig.add_trace(go.Scatter(x=self.test_loss.date, y=self.test_loss.loss,
                                      mode='lines', name='Test Loss'))
             fig.add_trace(go.Scatter(x=self.test_loss.date, y=self.test_loss.threshold_lower,
-                                     mode='lines', name='Threhold (lower)'))
+                                     mode='lines', name='Threshold (lower)'))
             fig.add_trace(go.Scatter(x=self.test_loss.date, y=self.test_loss.threshold_upper,
-                                     mode='lines', name='Threhold (upper)'))
-            fig.update_layout(showlegend=True, xaxis_title="Date", yaxis_title="Standardised value")
+                                     mode='lines', name='Threshold (upper)'))
+            fig.update_layout(showlegend=True, xaxis_title="Date", yaxis_title="Loss")
             fig.show()
 
         else:
@@ -148,7 +172,7 @@ class AutoEncoder_LSTM:
 
         if self.tested:
 
-            print("Below is data set split into train and test, with anomalies found marked")
+            print("Below is data set split into train and test, with anomalies marked")
             anomalies = self.test_loss[self.test_loss.anomaly]
             fig = go.Figure()
             fig.add_trace(go.Scatter(x=self.p_data.raw.date, y=self.p_data.raw.value,

@@ -8,7 +8,17 @@ venv/
 *.json
 *.zip
 *.xlsx
-docs
+*.gpx
+*.gpx.gz
+*.tcx
+*.tcx.gz
+*.fit
+*.fit.gz
+*.csv
+*.png
 
 # Jupyter checkpoints
 .ipynb_checkpoints/
+
+# Keep input data
+!sandf500_1986_2018.csv
